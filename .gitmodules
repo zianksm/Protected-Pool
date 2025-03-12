@@ -1,0 +1,3 @@
+[submodule "lib/Depeg-swap"]
+	path = lib/Depeg-swap
+	url = https://github.com/Cork-Technology/Depeg-swap
