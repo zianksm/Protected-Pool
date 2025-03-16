@@ -179,7 +179,7 @@ contract HedgeHook is BaseHook {
         }
     }
 
-    function _ensureCorrectMarkets(PoolKey calldata uniswapPoolKey, Id corkMarketId) internal {
+    function _ensureCorrectMarkets(PoolKey calldata uniswapPoolKey, Id corkMarketId) internal view {
         (address ra, address pa) = cork.underlyingAsset(corkMarketId);
 
         address token0 = Currency.unwrap(uniswapPoolKey.currency0);
@@ -189,17 +189,26 @@ contract HedgeHook is BaseHook {
         bool isCorrectPa = pa == token0 || pa == token1;
 
         if (!isCorrectPa || !isCorrectRa) {
+            // TODO custom errors
             revert("invalid market");
         }
     }
 
-    function _getHedge(PoolKey calldata uniswapPoolKey, Id corkMarketId) internal returns (Hedges storage hedge) {
+    function _getHedge(PoolKey calldata uniswapPoolKey, Id corkMarketId) internal view returns (Hedges storage hedge) {
         _ensureCorrectMarkets(uniswapPoolKey, corkMarketId);
 
         hedge = hedges[msg.sender][uniswapPoolKey.toId()][corkMarketId];
     }
 
     function getHedge(PoolKey calldata uniswapPoolKey, Id corkMarketId) external returns (Hedges memory hedge) {
-        hedge = _getHedge(uniswapPoolKey, corkMarketId);
+        MarketInfo memory currentDsMarket = _getCurrentMarketInfo(corkMarketId);
+        Hedges storage hedgeStorageRef = _getHedge(uniswapPoolKey, corkMarketId);
+
+        // we basically return an empty hedge position since the current DS can't be used to redeem RA back
+        if (hedgeStorageRef.epoch < currentDsMarket.epoch) {
+            return hedge;
+        } else {
+            hedge = hedgeStorageRef;
+        }
     }
 }
