@@ -54,7 +54,7 @@ contract HedgeHook is BaseHook {
             afterInitialize: false,
             beforeAddLiquidity: true, // allow adding liquidity with premium
             afterAddLiquidity: false,
-            beforeRemoveLiquidity: true, // allow removing liquidity while redeeming back RA using the premium
+            beforeRemoveLiquidity: false, // allow removing liquidity while redeeming back RA using the premium
             afterRemoveLiquidity: true, // do we need this?
             beforeSwap: false,
             afterSwap: false,
@@ -63,9 +63,29 @@ contract HedgeHook is BaseHook {
             beforeSwapReturnDelta: false,
             afterSwapReturnDelta: false,
             afterAddLiquidityReturnDelta: false,
-            afterRemoveLiquidityReturnDelta: false
+            afterRemoveLiquidityReturnDelta: true
         });
     }
+
+    // can execute limit orders, allows offchain keepers to call this
+    function batchExecuteLimitOrders() external {}
+
+    function cancelLimitOrders() external {}
+
+    function modifyLimitOrders() external {}
+
+    // allow user to directly buy DS on market price, ignoring the limit order
+    // can only be called by the liquidity owner
+    // TODO maybe use nft or something? currently just use msg.sender for simplicity sake
+    function forceExecuteOrder() external {}
+
+    // allow user to hedge their position by depositing RA
+    // the RA will be used to buy DS at the specified price
+    // this can be executed by 3 things
+    // - other user trading -> happens on before swap and if only we manage to integrate the stylus contract
+    // - keeper executing limit orders
+    // - user forcefully execute the limit order using current market price
+    function hedgeWithLimitOrder() external {}
 
     // allow reserving directly
     function afterAddLiquidity(
@@ -95,25 +115,26 @@ contract HedgeHook is BaseHook {
         returns (bytes4, BeforeSwapDelta, uint24)
     {}
 
-    // can execute limit orders, allows offchain keepers to call this
-    function batchExecuteLimitOrders() external {}
+    function _redeem(Id corkMarketId, PoolKey calldata uniswapPoolKey, uint256 amountPa)
+        internal
+        returns (uint256 received, uint256 dsUsed)
+    {
+        MarketInfo memory market = _getCurrentMarketInfo(corkMarketId);
+        Hedges storage hedgeStorageRef = _getHedge(uniswapPoolKey, corkMarketId);
 
-    function cancelLimitOrders() external {}
+        _ensureHedged(hedgeStorageRef, market);
 
-    function modifyLimitOrders() external {}
+        Asset(market.pa).approve(address(cork), amountPa);
+        // we'll set the allowance to 0 later don't worry
+        Asset(market.ds).approve(address(cork), type(uint256).max);
 
-    // allow user to directly buy DS on market price, ignoring the limit order
-    // can only be called by the liquidity owner
-    // TODO maybe use nft or something? currently just use msg.sender for simplicity sake
-    function forceExecuteOrder() external {}
+        (received,,, dsUsed) = cork.redeemRaWithDsPa(corkMarketId, market.epoch, amountPa);
 
-    // allow user to hedge their position by depositing RA
-    // the RA will be used to buy DS at the specified price
-    // this can be executed by 3 things
-    // - other user trading -> happens on before swap and if only we manage to integrate the stylus contract
-    // - keeper executing limit orders
-    // - user forcefully execute the limit order using current market price
-    function hedgeWithLimitOrder() external {}
+        hedgeStorageRef.dsBalance -= dsUsed;
+
+        // be a good blockchain citizen, set the allowance to 0
+        Asset(market.ds).approve(address(cork), 0);
+    }
 
     function hedgeWithRa(
         PoolKey calldata uniswapPoolKey,
@@ -160,7 +181,7 @@ contract HedgeHook is BaseHook {
         uint256 epoch;
     }
 
-    function _getCurrentMarketInfo(Id corkMarketId) internal returns (MarketInfo memory market) {
+    function _getCurrentMarketInfo(Id corkMarketId) internal view returns (MarketInfo memory market) {
         (market.ra, market.pa) = cork.underlyingAsset(corkMarketId);
         market.epoch = cork.lastDsId(corkMarketId);
         (market.ct, market.ds) = cork.swapAsset(corkMarketId, market.epoch);
@@ -198,6 +219,13 @@ contract HedgeHook is BaseHook {
         _ensureCorrectMarkets(uniswapPoolKey, corkMarketId);
 
         hedge = hedges[msg.sender][uniswapPoolKey.toId()][corkMarketId];
+    }
+
+    function _ensureHedged(Hedges storage hedgeStorageRef, MarketInfo memory market) internal view {
+        if (market.epoch > hedgeStorageRef.epoch) {
+            // TODO  custom errors
+            revert("no hedge position");
+        }
     }
 
     function getHedge(PoolKey calldata uniswapPoolKey, Id corkMarketId) external returns (Hedges memory hedge) {

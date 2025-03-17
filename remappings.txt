@@ -4,7 +4,7 @@
 @openzeppelin/contracts/=lib/Depeg-swap/lib/openzeppelin-contracts/contracts/
 @prb/math/=lib/Depeg-swap/lib/prb-math/
 @uniswap/v4-core/=lib/Depeg-swap/lib/Cork-Hook/lib/v4-periphery/lib/v4-core/
-BokkyPooBahsDateTimeLibrary/=lib/Depeg-swap/lib/BokkyPooBahsDateTimeLibrary/
+BokkyPooBahsDateTimeLibrary/=lib/Depeg-swap/lib/BokkyPooBahsDateTimeLibrary/contracts
 Cork-Hook/=lib/Depeg-swap/lib/Cork-Hook/src
 Depeg-swap/=lib/Depeg-swap/
 ds-test/=lib/Depeg-swap/lib/openzeppelin-contracts-upgradeable/lib/forge-std/lib/ds-test/src/
