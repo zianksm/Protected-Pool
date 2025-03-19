@@ -8,7 +8,7 @@ import {PoolIdLibrary, PoolId} from "v4-periphery/lib/v4-core/src/types/PoolId.s
 import {Currency} from "v4-periphery/lib/v4-core/src/types/Currency.sol";
 import {IHooks} from "v4-periphery/lib/v4-core/src/interfaces/IHooks.sol";
 import {Id} from "Depeg-swap/contracts/libraries/Pair.sol";
-import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
+import {BalanceDelta, toBalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {ModuleCore} from "Depeg-swap/contracts/core/ModuleCore.sol";
 import {RouterState} from "Depeg-swap/contracts/core/flash-swaps/FlashSwapRouter.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "v4-periphery/lib/v4-core/src/types/BeforeSwapDelta.sol";
@@ -95,7 +95,20 @@ contract HedgeHook is BaseHook {
         BalanceDelta delta,
         BalanceDelta feesAccrued,
         bytes calldata hookData
-    ) external override returns (bytes4, BalanceDelta) {}
+    ) external override returns (bytes4, BalanceDelta) {
+        bool isHedgeWithRa = abi.decode(hookData, (bool));
+
+        if (isHedgeWithRa) {
+            (, HedgeWithRaParams memory arg) = abi.decode(hookData, (bool, HedgeWithRaParams));
+            _hedgeWithRa(arg, sender);
+        } else {
+            (, HedgeWithDsParams memory arg) = abi.decode(hookData, (bool, HedgeWithDsParams));
+            _hedgeWithDs(arg, sender);
+        }
+
+        // we don't modify with the currency
+        return (this.afterAddLiquidity.selector, toBalanceDelta(0, 0));
+    }
 
     // allow us to redeem RA with the DS & PA in case of depegs
     function afterRemoveLiquidity(
@@ -105,7 +118,19 @@ contract HedgeHook is BaseHook {
         BalanceDelta delta,
         BalanceDelta feesAccrued,
         bytes calldata hookData
-    ) external override returns (bytes4, BalanceDelta) {}
+    ) external override returns (bytes4, BalanceDelta) {
+        bool isRedeemHedge = abi.decode(hookData, (bool));
+
+        if (isRedeemHedge) {
+            // TODO handle taking the actual PA from the pool manager
+            (, uint256 amountPa, Id corkMarketId) = abi.decode(hookData, (bool, uint256, Id));
+            _redeem(corkMarketId, key, amountPa, sender);
+            // TODO handle the return delta
+        } else {
+            // we won't do anything if user decide not to redeem
+            return (this.afterRemoveLiquidity.selector, toBalanceDelta(0, 0));
+        }
+    }
 
     // maybe execute limit orders on the current pair that's being traded if we can manage to integrate stylus contract
     // to calculate the borrow amount using the bisection method
@@ -115,12 +140,12 @@ contract HedgeHook is BaseHook {
         returns (bytes4, BeforeSwapDelta, uint24)
     {}
 
-    function _redeem(Id corkMarketId, PoolKey calldata uniswapPoolKey, uint256 amountPa)
+    function _redeem(Id corkMarketId, PoolKey calldata uniswapPoolKey, uint256 amountPa, address sender)
         internal
         returns (uint256 received, uint256 dsUsed)
     {
         MarketInfo memory market = _getCurrentMarketInfo(corkMarketId);
-        Hedges storage hedgeStorageRef = _getHedge(uniswapPoolKey, corkMarketId);
+        Hedges storage hedgeStorageRef = _getHedge(uniswapPoolKey, corkMarketId, sender);
 
         _ensureHedged(hedgeStorageRef, market);
 
@@ -134,41 +159,61 @@ contract HedgeHook is BaseHook {
 
         // be a good blockchain citizen, set the allowance to 0
         Asset(market.ds).approve(address(cork), 0);
+
+        Asset(market.ra).transfer(sender, received);
     }
 
-    function hedgeWithRa(
-        PoolKey calldata uniswapPoolKey,
-        Id corkMarketId,
-        uint256 amount,
-        uint256 amountOutMin,
-        IDsFlashSwapCore.BuyAprroxParams calldata approxParams,
-        IDsFlashSwapCore.OffchainGuess calldata offchainGuess
-    ) external returns (uint256 amountOut) {
-        _ensureCorrectMarkets(uniswapPoolKey, corkMarketId);
+    struct HedgeWithRaParams {
+        PoolKey uniswapPoolKey;
+        Id corkMarketId;
+        uint256 amount;
+        uint256 amountOutMin;
+        IDsFlashSwapCore.BuyAprroxParams approxParams;
+        IDsFlashSwapCore.OffchainGuess offchainGuess;
+    }
 
-        (address ra,) = cork.underlyingAsset(corkMarketId);
-        uint256 epoch = cork.lastDsId(corkMarketId);
-        Asset(ra).transferFrom(msg.sender, address(this), amount);
+    function hedgeWithRa(HedgeWithRaParams calldata params) external returns (uint256 amountOut) {
+        return _hedgeWithRa(params, msg.sender);
+    }
 
-        Asset(ra).approve(address(flashSwapRouter), amount);
+    function _hedgeWithRa(HedgeWithRaParams memory params, address sender) internal returns (uint256 amountOut) {
+        _ensureCorrectMarkets(params.uniswapPoolKey, params.corkMarketId);
+
+        (address ra,) = cork.underlyingAsset(params.corkMarketId);
+        uint256 epoch = cork.lastDsId(params.corkMarketId);
+        Asset(ra).transferFrom(sender, address(this), params.amount);
+
+        Asset(ra).approve(address(flashSwapRouter), params.amount);
         // should handle refunded ct, but we'll skip it for now for simplicity sake lol
-        IDsFlashSwapCore.SwapRaForDsReturn memory result =
-            flashSwapRouter.swapRaforDs(corkMarketId, epoch, amount, amountOutMin, approxParams, offchainGuess);
+        IDsFlashSwapCore.SwapRaForDsReturn memory result = flashSwapRouter.swapRaforDs(
+            params.corkMarketId, epoch, params.amount, params.amountOutMin, params.approxParams, params.offchainGuess
+        );
+        amountOut = result.amountOut;
 
-        _updateHedgeStatus(uniswapPoolKey, corkMarketId, result.amountOut);
+        _updateHedgeStatus(params.uniswapPoolKey, params.corkMarketId, result.amountOut, sender);
 
         // TODO event
+        return amountOut;
     }
 
-    // allow user to hedge directly with this pair DS on a particular epoch
-    function hedgeWithDs(PoolKey calldata uniswapPoolKey, Id corkMarketId, uint256 amount) external {
-        _ensureCorrectMarkets(uniswapPoolKey, corkMarketId);
+    struct HedgeWithDsParams {
+        PoolKey uniswapPoolKey;
+        Id corkMarketId;
+        uint256 amount;
+    }
 
-        _updateHedgeStatus(uniswapPoolKey, corkMarketId, amount);
+    function hedgeWithDs(HedgeWithDsParams calldata params) external {
+        _hedgeWithDs(params, msg.sender);
+    }
 
-        MarketInfo memory market = _getCurrentMarketInfo(corkMarketId);
+    function _hedgeWithDs(HedgeWithDsParams memory params, address sender) internal {
+        _ensureCorrectMarkets(params.uniswapPoolKey, params.corkMarketId);
 
-        Asset(market.ds).transferFrom(msg.sender, address(this), amount);
+        _updateHedgeStatus(params.uniswapPoolKey, params.corkMarketId, params.amount, sender);
+
+        MarketInfo memory market = _getCurrentMarketInfo(params.corkMarketId);
+
+        Asset(market.ds).transferFrom(sender, address(this), params.amount);
 
         // TODO event
     }
@@ -187,10 +232,12 @@ contract HedgeHook is BaseHook {
         (market.ct, market.ds) = cork.swapAsset(corkMarketId, market.epoch);
     }
 
-    function _updateHedgeStatus(PoolKey calldata uniswapPoolKey, Id corkMarketId, uint256 amount) internal {
+    function _updateHedgeStatus(PoolKey memory uniswapPoolKey, Id corkMarketId, uint256 amount, address sender)
+        internal
+    {
         MarketInfo memory market = _getCurrentMarketInfo(corkMarketId);
 
-        Hedges storage hedge = _getHedge(uniswapPoolKey, corkMarketId);
+        Hedges storage hedge = _getHedge(uniswapPoolKey, corkMarketId, sender);
 
         if (hedge.epoch < market.epoch) {
             hedge.dsBalance = amount;
@@ -200,7 +247,7 @@ contract HedgeHook is BaseHook {
         }
     }
 
-    function _ensureCorrectMarkets(PoolKey calldata uniswapPoolKey, Id corkMarketId) internal view {
+    function _ensureCorrectMarkets(PoolKey memory uniswapPoolKey, Id corkMarketId) internal view {
         (address ra, address pa) = cork.underlyingAsset(corkMarketId);
 
         address token0 = Currency.unwrap(uniswapPoolKey.currency0);
@@ -215,10 +262,14 @@ contract HedgeHook is BaseHook {
         }
     }
 
-    function _getHedge(PoolKey calldata uniswapPoolKey, Id corkMarketId) internal view returns (Hedges storage hedge) {
+    function _getHedge(PoolKey memory uniswapPoolKey, Id corkMarketId, address sender)
+        internal
+        view
+        returns (Hedges storage hedge)
+    {
         _ensureCorrectMarkets(uniswapPoolKey, corkMarketId);
 
-        hedge = hedges[msg.sender][uniswapPoolKey.toId()][corkMarketId];
+        hedge = hedges[sender][uniswapPoolKey.toId()][corkMarketId];
     }
 
     function _ensureHedged(Hedges storage hedgeStorageRef, MarketInfo memory market) internal view {
@@ -228,9 +279,9 @@ contract HedgeHook is BaseHook {
         }
     }
 
-    function getHedge(PoolKey calldata uniswapPoolKey, Id corkMarketId) external returns (Hedges memory hedge) {
+    function getHedge(PoolKey calldata uniswapPoolKey, Id corkMarketId) external view returns (Hedges memory hedge) {
         MarketInfo memory currentDsMarket = _getCurrentMarketInfo(corkMarketId);
-        Hedges storage hedgeStorageRef = _getHedge(uniswapPoolKey, corkMarketId);
+        Hedges storage hedgeStorageRef = _getHedge(uniswapPoolKey, corkMarketId, msg.sender);
 
         // we basically return an empty hedge position since the current DS can't be used to redeem RA back
         if (hedgeStorageRef.epoch < currentDsMarket.epoch) {
