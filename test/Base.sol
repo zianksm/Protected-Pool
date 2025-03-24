@@ -12,9 +12,9 @@ contract TestBase is Helper {
         Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.AFTER_ADD_LIQUIDITY_RETURNS_DELTA_FLAG
             | Hooks.AFTER_REMOVE_LIQUIDITY_FLAG
     );
-    HedgeHook hedgehook;
 
-    PoolKey defaultKey;
+    HedgeHook internal hedgehook;
+    PoolKey internal defaultKey;
 
     function setupHedgeHookTest() internal virtual {
         deployModuleCore();
