@@ -14,6 +14,7 @@ import {RouterState} from "Depeg-swap/contracts/core/flash-swaps/FlashSwapRouter
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "v4-periphery/lib/v4-core/src/types/BeforeSwapDelta.sol";
 import {IDsFlashSwapCore} from "Depeg-swap/contracts/interfaces/IDsFlashSwapRouter.sol";
 import {Asset} from "Depeg-swap/contracts/core/assets/Asset.sol";
+import {CurrencySettler} from "v4-periphery/lib/v4-core/test/utils/CurrencySettler.sol";
 
 // TODO limit order DS by pooling RA
 // maybe use stylus contract to compute the bisection method?
@@ -22,11 +23,24 @@ struct LimitOrders {
     uint256 threshold;
 }
 
-// struct Premium{}
-
 struct Hedges {
     uint256 dsBalance;
     uint256 epoch;
+}
+
+struct HedgeWithDsParams {
+    PoolKey uniswapPoolKey;
+    Id corkMarketId;
+    uint256 amount;
+}
+
+struct HedgeWithRaParams {
+    PoolKey uniswapPoolKey;
+    Id corkMarketId;
+    uint256 amount;
+    uint256 amountOutMin;
+    IDsFlashSwapCore.BuyAprroxParams approxParams;
+    IDsFlashSwapCore.OffchainGuess offchainGuess;
 }
 
 // lets support just straight up hedging with RA
@@ -52,8 +66,8 @@ contract HedgeHook is BaseHook {
         return Hooks.Permissions({
             beforeInitialize: false,
             afterInitialize: false,
-            beforeAddLiquidity: true, // allow adding liquidity with premium
-            afterAddLiquidity: false,
+            beforeAddLiquidity: false, // allow adding liquidity with premium
+            afterAddLiquidity: true,
             beforeRemoveLiquidity: false, // allow removing liquidity while redeeming back RA using the premium
             afterRemoveLiquidity: true, // do we need this?
             beforeSwap: false,
@@ -89,22 +103,25 @@ contract HedgeHook is BaseHook {
 
     // allow reserving directly
     function afterAddLiquidity(
-        address sender,
+        address,
         PoolKey calldata key,
         IPoolManager.ModifyLiquidityParams calldata params,
         BalanceDelta delta,
         BalanceDelta feesAccrued,
         bytes calldata hookData
     ) external override returns (bytes4, BalanceDelta) {
-        bool isHedgeWithRa = abi.decode(hookData, (bool));
-
-        if (isHedgeWithRa) {
-            (, HedgeWithRaParams memory arg) = abi.decode(hookData, (bool, HedgeWithRaParams));
-            _hedgeWithRa(arg, sender);
-        } else {
-            (, HedgeWithDsParams memory arg) = abi.decode(hookData, (bool, HedgeWithDsParams));
-            _hedgeWithDs(arg, sender);
+        // user does not want to hedge, no-op
+        if (hookData.length == 0) {
+            return (this.afterAddLiquidity.selector, toBalanceDelta(0, 0));
         }
+
+        (address sender) = abi.decode(hookData, (address));
+
+        // currently only hedging with DS directly is supported, since swapping RA
+        // uses the cork flash swap router which has a dependency to another uni 4 hook that's unable to acquire the lock
+        // solution to this would be writing a router for this kind of things
+        (, HedgeWithDsParams memory arg) = abi.decode(hookData, (address, HedgeWithDsParams));
+        _hedgeWithDs(arg, sender);
 
         // we don't modify with the currency
         return (this.afterAddLiquidity.selector, toBalanceDelta(0, 0));
@@ -163,15 +180,6 @@ contract HedgeHook is BaseHook {
         Asset(market.ra).transfer(sender, received);
     }
 
-    struct HedgeWithRaParams {
-        PoolKey uniswapPoolKey;
-        Id corkMarketId;
-        uint256 amount;
-        uint256 amountOutMin;
-        IDsFlashSwapCore.BuyAprroxParams approxParams;
-        IDsFlashSwapCore.OffchainGuess offchainGuess;
-    }
-
     function hedgeWithRa(HedgeWithRaParams calldata params) external returns (uint256 amountOut) {
         return _hedgeWithRa(params, msg.sender);
     }
@@ -194,12 +202,6 @@ contract HedgeHook is BaseHook {
 
         // TODO event
         return amountOut;
-    }
-
-    struct HedgeWithDsParams {
-        PoolKey uniswapPoolKey;
-        Id corkMarketId;
-        uint256 amount;
     }
 
     function hedgeWithDs(HedgeWithDsParams calldata params) external {
