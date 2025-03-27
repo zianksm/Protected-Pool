@@ -129,20 +129,31 @@ contract HedgeHook is BaseHook {
 
     // allow us to redeem RA with the DS & PA in case of depegs
     function afterRemoveLiquidity(
-        address sender,
+        address router,
         PoolKey calldata key,
         IPoolManager.ModifyLiquidityParams calldata params,
         BalanceDelta delta,
         BalanceDelta feesAccrued,
         bytes calldata hookData
     ) external override returns (bytes4, BalanceDelta) {
-        bool isRedeemHedge = abi.decode(hookData, (bool));
+        bool isRedeemHedge = hookData.length > 0 ? abi.decode(hookData, (bool)) : false;
 
         if (isRedeemHedge) {
-            // TODO handle taking the actual PA from the pool manager
-            (, uint256 amountPa, Id corkMarketId) = abi.decode(hookData, (bool, uint256, Id));
-            _redeem(corkMarketId, key, amountPa, sender);
-            // TODO handle the return delta
+            (, uint256 amountPa, Id corkMarketId, address sender) = abi.decode(hookData, (bool, uint256, Id, address));
+
+            MarketInfo memory info = _getCurrentMarketInfo(corkMarketId);
+
+            CurrencySettler.take(Currency.wrap(info.pa), poolManager, address(this), amountPa, false);
+
+            (uint256 raReceived,) = _redeem(corkMarketId, key, amountPa, sender);
+
+            CurrencySettler.settle(Currency.wrap(info.ra), poolManager, address(this), raReceived, false);
+
+            (int128 delta0, int128 delta1) = info.pa < info.ra
+                ? (int128(int256(amountPa)), int128(-int256(raReceived)))
+                : (int128(-int256(raReceived)), int128(int256(amountPa)));
+
+            return (this.afterRemoveLiquidity.selector, toBalanceDelta(delta0, delta1));
         } else {
             // we won't do anything if user decide not to redeem
             return (this.afterRemoveLiquidity.selector, toBalanceDelta(0, 0));

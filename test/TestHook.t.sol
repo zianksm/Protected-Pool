@@ -55,4 +55,16 @@ contract TestHook is TestBase {
 
         assertGe(hedge.dsBalance, depositAmount);
     }
+
+    function testRedeemDirect() external {
+        uint256 depositAmount = 10 ether;
+        addLiquidity(10 ether, 10 ether, "");
+
+        HedgeWithRaParams memory params = buildHedgeWithRaParams(depositAmount);
+
+        hedgehook.hedgeWithRa(params);
+        poolManager.getPositionInfo(manager, poolId, owner, tickLower, tickUpper, salt);
+
+        
+    }
 }
