@@ -1,6 +1,8 @@
 pragma solidity ^0.8.0;
 
 import "./Base.sol";
+import "forge-std/console.sol";
+import {PoolIdLibrary, PoolId} from "v4-periphery/lib/v4-core/src/types/PoolId.sol";
 
 contract TestHook is TestBase {
     function setUp() external {
@@ -56,15 +58,52 @@ contract TestHook is TestBase {
         assertGe(hedge.dsBalance, depositAmount);
     }
 
-    function testRedeemDirect() external {
-        uint256 depositAmount = 10 ether;
-        addLiquidity(10 ether, 10 ether, "");
+    function testFuzzRedeemDirect(uint256 depositAmount) external {
+        uint256 liquidityAmount = 10 ether;
+        vm.assume(depositAmount < liquidityAmount && depositAmount > 0);
 
-        HedgeWithRaParams memory params = buildHedgeWithRaParams(depositAmount);
+        addLiquidity(liquidityAmount, liquidityAmount, "");
 
-        hedgehook.hedgeWithRa(params);
-        poolManager.getPositionInfo(manager, poolId, owner, tickLower, tickUpper, salt);
+        corkConfig.updatePsmBaseRedemptionFeePercentage(defaultCurrencyId, 0);
+        moduleCore.depositPsm(defaultCurrencyId, depositAmount);
 
-        
+        (, address ds) = moduleCore.swapAsset(defaultCurrencyId, 1);
+        _maxApprove(ds);
+
+        HedgeWithDsParams memory params = buildHedgeWithDsParams(depositAmount);
+
+        hedgehook.hedgeWithDs(params);
+
+        (, address caller,) = vm.readCallers();
+
+        (uint128 liquidity,,) = StateLibrary.getPositionInfo(
+            poolManager,
+            PoolIdLibrary.toId(defaultKey),
+            address(modifyLiquidityRouter),
+            LIQUIDITY_PARAMS.tickLower,
+            LIQUIDITY_PARAMS.tickUpper,
+            0
+        );
+
+        IPoolManager.ModifyLiquidityParams memory modifyParams;
+        modifyParams.salt = 0;
+        modifyParams.tickLower = LIQUIDITY_PARAMS.tickLower;
+        modifyParams.tickUpper = LIQUIDITY_PARAMS.tickUpper;
+        // we take it out
+        modifyParams.liquidityDelta = -int128(liquidity);
+        RedeemParams memory redeemParams = RedeemParams(defaultCurrencyId, depositAmount, DEFAULT_ADDRESS);
+
+        uint256 paBalanceBefore = pa.balanceOf(DEFAULT_ADDRESS);
+        uint256 raBalanceBefore = ra.balanceOf(DEFAULT_ADDRESS);
+
+        modifyLiquidityRouter.modifyLiquidity(defaultKey, modifyParams, abi.encode(redeemParams));
+
+        uint256 paBalanceAfter = pa.balanceOf(DEFAULT_ADDRESS);
+        uint256 raBalanceAfter = ra.balanceOf(DEFAULT_ADDRESS);
+
+        // we should receive pa - deposit amount since we used thaat to redeem RA
+        assertApproxEqAbs(paBalanceAfter - paBalanceBefore, liquidityAmount - depositAmount, 10);
+        // we should receive the original liquidity + the deposit amount since we essentially converted that from the pa
+        assertApproxEqAbs(raBalanceAfter - raBalanceBefore, liquidityAmount + depositAmount, 10);
     }
 }

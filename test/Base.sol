@@ -20,6 +20,8 @@ contract TestBase is Helper {
 
     HedgeHook internal hedgehook;
     PoolKey internal defaultKey;
+    DummyWETH ra;
+    DummyWETH pa;
 
     function setupHedgeHookTest() internal virtual {
         deployModuleCore();
@@ -32,7 +34,7 @@ contract TestBase is Helper {
 
         hedgehook = HedgeHook(address(hookAddress));
 
-        (DummyWETH ra, DummyWETH pa,) = initializeAndIssueNewDs(10 days);
+        (ra, pa,) = initializeAndIssueNewDs(10 days);
         (token0, token1) = ra < pa ? (Asset(address(ra)), Asset(address(pa))) : (Asset(address(pa)), Asset(address(ra)));
 
         initializeProtectedPool();

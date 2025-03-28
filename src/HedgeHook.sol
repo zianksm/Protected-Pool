@@ -43,6 +43,12 @@ struct HedgeWithRaParams {
     IDsFlashSwapCore.OffchainGuess offchainGuess;
 }
 
+struct RedeemParams {
+    Id corkMarketId;
+    uint256 amount;
+    address user;
+}
+
 // lets support just straight up hedging with RA
 contract HedgeHook is BaseHook {
     using PoolIdLibrary for PoolKey;
@@ -136,22 +142,22 @@ contract HedgeHook is BaseHook {
         BalanceDelta feesAccrued,
         bytes calldata hookData
     ) external override returns (bytes4, BalanceDelta) {
-        bool isRedeemHedge = hookData.length > 0 ? abi.decode(hookData, (bool)) : false;
+        bool isRedeemHedge = hookData.length > 0 ? true : false;
 
         if (isRedeemHedge) {
-            (, uint256 amountPa, Id corkMarketId, address sender) = abi.decode(hookData, (bool, uint256, Id, address));
+            RedeemParams memory params = abi.decode(hookData, (RedeemParams));
 
-            MarketInfo memory info = _getCurrentMarketInfo(corkMarketId);
+            MarketInfo memory info = _getCurrentMarketInfo(params.corkMarketId);
 
-            CurrencySettler.take(Currency.wrap(info.pa), poolManager, address(this), amountPa, false);
+            CurrencySettler.take(Currency.wrap(info.pa), poolManager, address(this), params.amount, false);
 
-            (uint256 raReceived,) = _redeem(corkMarketId, key, amountPa, sender);
+            (uint256 raReceived,) = _redeem(params.corkMarketId, key, params.amount, params.user);
 
             CurrencySettler.settle(Currency.wrap(info.ra), poolManager, address(this), raReceived, false);
 
             (int128 delta0, int128 delta1) = info.pa < info.ra
-                ? (int128(int256(amountPa)), int128(-int256(raReceived)))
-                : (int128(-int256(raReceived)), int128(int256(amountPa)));
+                ? (int128(int256(params.amount)), int128(-int256(raReceived)))
+                : (int128(-int256(raReceived)), int128(int256(params.amount)));
 
             return (this.afterRemoveLiquidity.selector, toBalanceDelta(delta0, delta1));
         } else {
@@ -186,9 +192,9 @@ contract HedgeHook is BaseHook {
         hedgeStorageRef.dsBalance -= dsUsed;
 
         // be a good blockchain citizen, set the allowance to 0
-        Asset(market.ds).approve(address(cork), 0);
+        // Asset(market.ds).approve(address(cork), 0);
 
-        Asset(market.ra).transfer(sender, received);
+        // Asset(market.ra).transfer(sender, received);
     }
 
     function hedgeWithRa(HedgeWithRaParams calldata params) external returns (uint256 amountOut) {
@@ -303,4 +309,7 @@ contract HedgeHook is BaseHook {
             hedge = hedgeStorageRef;
         }
     }
+
+    // TODO
+    function deHedge() external {}
 }
