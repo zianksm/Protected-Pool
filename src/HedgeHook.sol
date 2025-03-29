@@ -190,11 +190,6 @@ contract HedgeHook is BaseHook {
         (received,,, dsUsed) = cork.redeemRaWithDsPa(corkMarketId, market.epoch, amountPa);
 
         hedgeStorageRef.dsBalance -= dsUsed;
-
-        // be a good blockchain citizen, set the allowance to 0
-        // Asset(market.ds).approve(address(cork), 0);
-
-        // Asset(market.ra).transfer(sender, received);
     }
 
     function hedgeWithRa(HedgeWithRaParams calldata params) external returns (uint256 amountOut) {
@@ -217,7 +212,6 @@ contract HedgeHook is BaseHook {
 
         _updateHedgeStatus(params.uniswapPoolKey, params.corkMarketId, result.amountOut, sender);
 
-        // TODO event
         return amountOut;
     }
 
@@ -233,8 +227,6 @@ contract HedgeHook is BaseHook {
         MarketInfo memory market = _getCurrentMarketInfo(params.corkMarketId);
 
         Asset(market.ds).transferFrom(sender, address(this), params.amount);
-
-        // TODO event
     }
 
     struct MarketInfo {
@@ -276,7 +268,6 @@ contract HedgeHook is BaseHook {
         bool isCorrectPa = pa == token0 || pa == token1;
 
         if (!isCorrectPa || !isCorrectRa) {
-            // TODO custom errors
             revert("invalid market");
         }
     }
@@ -293,7 +284,6 @@ contract HedgeHook is BaseHook {
 
     function _ensureHedged(Hedges storage hedgeStorageRef, MarketInfo memory market) internal view {
         if (market.epoch > hedgeStorageRef.epoch) {
-            // TODO  custom errors
             revert("no hedge position");
         }
     }
@@ -310,6 +300,18 @@ contract HedgeHook is BaseHook {
         }
     }
 
-    // TODO
-    function deHedge() external {}
-}
+    function deHedge(PoolKey memory uniswapPoolKey, Id corkMarketId, uint256 amount)
+        internal
+    {
+        MarketInfo memory market = _getCurrentMarketInfo(corkMarketId);
+
+        Hedges storage hedge = _getHedge(uniswapPoolKey, corkMarketId, sender);
+
+        if (hedge.epoch < market.epoch) {
+            revert("no hedge or outdated hedge");
+        } else {
+            hedge.dsBalance -= amount;
+        }
+
+        Asset(market.ds).transfer(msg.sender, amount);
+    }}
