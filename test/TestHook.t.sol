@@ -106,4 +106,30 @@ contract TestHook is TestBase {
         // we should receive the original liquidity + the deposit amount since we essentially converted that from the pa
         assertApproxEqAbs(raBalanceAfter - raBalanceBefore, liquidityAmount + depositAmount, 10);
     }
+
+    function testDeHedge() external {
+        addLiquidity(10 ether, 10 ether, "");
+
+        uint256 depositAmount = 10 ether;
+        moduleCore.depositPsm(defaultCurrencyId, depositAmount);
+
+        (, address ds) = moduleCore.swapAsset(defaultCurrencyId, 1);
+        _maxApprove(ds);
+
+        HedgeWithDsParams memory params = buildHedgeWithDsParams(depositAmount);
+
+        hedgehook.hedgeWithDs(params);
+
+        uint256 dsBalanceBefore = Asset(ds).balanceOf(DEFAULT_ADDRESS);
+
+        hedgehook.deHedge(defaultKey, defaultCurrencyId, depositAmount);
+
+        uint256 dsBalanceAfter = Asset(ds).balanceOf(DEFAULT_ADDRESS);
+
+        assertEq(dsBalanceAfter - dsBalanceBefore, depositAmount);
+
+        Hedges memory hedge = hedgehook.getHedge(defaultKey, defaultCurrencyId);
+
+        assertEq(hedge.dsBalance, 0);
+    }
 }

@@ -300,10 +300,10 @@ contract HedgeHook is BaseHook {
         }
     }
 
-    function deHedge(PoolKey memory uniswapPoolKey, Id corkMarketId, uint256 amount) internal {
+    function deHedge(PoolKey memory uniswapPoolKey, Id corkMarketId, uint256 amount) external {
         MarketInfo memory market = _getCurrentMarketInfo(corkMarketId);
 
-        Hedges storage hedge = _getHedge(uniswapPoolKey, corkMarketId, sender);
+        Hedges storage hedge = _getHedge(uniswapPoolKey, corkMarketId, msg.sender);
 
         if (hedge.epoch < market.epoch) {
             revert("no hedge or outdated hedge");
