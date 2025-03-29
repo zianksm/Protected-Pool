@@ -300,9 +300,7 @@ contract HedgeHook is BaseHook {
         }
     }
 
-    function deHedge(PoolKey memory uniswapPoolKey, Id corkMarketId, uint256 amount)
-        internal
-    {
+    function deHedge(PoolKey memory uniswapPoolKey, Id corkMarketId, uint256 amount) internal {
         MarketInfo memory market = _getCurrentMarketInfo(corkMarketId);
 
         Hedges storage hedge = _getHedge(uniswapPoolKey, corkMarketId, sender);
@@ -314,4 +312,5 @@ contract HedgeHook is BaseHook {
         }
 
         Asset(market.ds).transfer(msg.sender, amount);
-    }}
+    }
+}
