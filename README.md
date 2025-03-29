@@ -1,5 +1,5 @@
 # Protected Pool
-This is a uniswap v4 hooks that aims to protect liquidity providers from impermanent loss(in case of depegs) by integrating with [Cork Protocol Peg Stability Module](https://docs.cork.tech/core-concepts/peg-stability-module).
+This is a uniswap v4 hooks that aims to protect liquidity providers from impermanent loss(in case of depegs) by integrating [Cork Protocol Peg Stability Module](https://docs.cork.tech/core-concepts/peg-stability-module).
 
 ## Unified Position Hedging
 ![hook diagram](docs/diagram.png)
