@@ -2,6 +2,7 @@
 This is a uniswap v4 hooks that aims to protect liquidity providers from impermanent loss(in case of depegs) by integrating with [Cork Protocol Peg Stability Module](https://docs.cork.tech/core-concepts/peg-stability-module).
 
 ## Unified Position Hedging
+![hook diagram](docs/diagram.png)
 This hook enables user to hedge their liquidity position by depositing cork [Depeg Swap](https://docs.cork.tech/core-concepts/depeg-swap)(DS) that can be used to convert [Pegged Asset](https://docs.cork.tech/core-concepts/pegged-asset) in the pool(e.g wstETH in wETH:wstETH market) into [Redemption Asset](https://docs.cork.tech/core-concepts/redemption-asset)(this would be wETH in previous example) when removing liquidity from the pool. Further more, the DS that user deposit is **unified**. Meaning, user's DS can be used regardless of user position. I.e user does not need to manage DS position like they need for their liquidity position.
 
 
